@@ -3,7 +3,7 @@ It is an analytical project that I performed for a petrol station in Poland in 2
 As an input file I get PDF (Historia_nalan.pdf).
 The source file contains transactions from all 14 fuel distributors concluded in one day.
 This project was a prototype and the aim was to show the station manager what information
-can be extracted from files like Historia_nalan.pdf. The final results of the prototype were presented in the file Report.html
+can be extracted from files like Historia_nalan.pdf. The final results of the prototype were presented in the file Report.pdf
 
 Unfortunately, I couldn't develop the project further because of management changes at petrol station
 
