@@ -1,0 +1,286 @@
+---
+title: "Raport tankowań 12.10.2020"
+author: "Kajetan Chodorowski"
+date: "16/10/2020"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+```{r lib}
+library(pdftools)
+library(tidyverse)
+library(chron)
+library(ggplot2)
+library(dplyr)
+library(reshape2)
+library(knitr)
+```
+
+```{r script, cache=TRUE}
+
+if_thousand<- function(string){
+        k<- NULL
+        for(j in 1:length(string)){
+                if(length(string[[j]])>13){
+                        k <- c(k,j)   
+                }
+                
+        }
+        for (m in k) {
+                string[[m]][7] <-paste0(string[[m]][7],string[[m]][8])
+                string[[m]]<- string[[m]][-8]
+        }
+        string
+}
+##Reading data
+PDF <- pdf_text("Historia_nalan.pdf") %>%
+        readr::read_lines() #open the PDF inside your project folder
+head_positions<- seq(0, length(PDF), 44)
+head_positions[1]<-1
+for(i in head_positions){
+        head_positions<- c(head_positions, (i+1):(i+4))
+}
+PDF_clean<-PDF[-head_positions]
+PDF_clean <- PDF_clean[!(PDF_clean=="")]
+##Cleaning data
+var_names<- c("Data", "Waz", "SYMBOL", "Ilosc" , "Cena", "Wartość", "Uzytkownik", 
+              "Stanowisko", "Dokument", "Nr_dokumentu", "Status", "Tryb")
+Dyst_pos<-grep("(.*)Dystrybutor:(.*)", PDF_clean)
+k<-2
+for(i in Dyst_pos){
+        Dyst<-as.numeric(gsub("Dystrybutor: ", "", PDF_clean[i]))
+        if(!(is.na(Dyst_pos[k]))){
+                lines_sep<- PDF_clean[(i+1):(Dyst_pos[k]-1)] %>% str_squish() %>% strsplit(split = " ") # first command remove spaces if more the 1, 
+                #second separate data by spaces.
+        }else{
+                lines_sep<- PDF_clean[(i+1):(length(PDF_clean))] %>% str_squish() %>% strsplit(split = " ") # first command remove spaces if more the 1, 
+                #second separate data by spaces.
+        }
+        lines_sep<-if_thousand(lines_sep)
+        df <- plyr::ldply(lines_sep) #create a data frame
+        df <- df %>% unite(V1.2, V1, V2, sep = " ") #marge columns
+        colnames(df) <- var_names
+        df<- mutate(df, Dystrybutor = rep(Dyst, nrow(df)))
+        if(i==1){
+                All_data <- df
+        } else{
+                All_data <- rbind(All_data, df)      
+        }
+        k<-k+1
+        
+}
+final_df <- as_tibble(All_data) 
+final_df$Data<- strptime(final_df$Data, "%Y-%m-%d %H:%M:%S")
+final_df$Waz <- as.numeric(final_df$Waz)
+final_df$SYMBOL <- as.factor(final_df$SYMBOL)
+final_df$Ilosc <- as.numeric(gsub(",",".",final_df$Ilosc))
+final_df$Cena <- as.numeric(gsub(",",".",final_df$Cena))
+final_df$Wartość <- as.numeric(gsub(",",".",final_df$Wartość))
+final_df$Uzytkownik <- as.factor(final_df$Uzytkownik)
+final_df$Stanowisko <- as.numeric(final_df$Stanowisko)
+
+```
+W raporcie umieściłem te dane,  które udało mi się wyciągnąć z *Historia nalań*, a przy tym wydają sie znaczące. Każdą zmienną przedstawiłem na trzech różnych wykresach, zobacz które przedsatwienie najbardziej Ci odpowiada.
+
+# Wykorzystanie dystrybutorów na stacji  
+
+Liczba tankowań w ciągu jednego dnia dla poszczególnych dystrybutorów.    
+```{r liczba nalan}
+final_df_summ <- final_df %>% group_by(Dystrybutor) %>%
+        summarise( Liczba_nalan = length(Dystrybutor), Litry =round(sum(Ilosc),0), 
+                   Przychod = round(sum(Wartość))) #summary
+ggplot(final_df_summ, aes(x=Dystrybutor, y=Liczba_nalan))+  
+        geom_bar(stat="identity" , fill = "#14213d") +
+        ylim(0,1.1*(max(final_df_summ$Liczba_nalan)))+
+        theme(axis.text.x = element_text( color = "#000000", 
+        hjust = 1), axis.title.x = element_text(color = "#000000", face = "bold"),
+        axis.title.y = element_text( color = "#000000" ,face = "bold"), 
+        axis.text.y = element_text( color = "#000000", hjust = 1),
+        plot.title = element_text(hjust = 0.5, face = "bold" ))+
+        labs(title = "Liczba nalan w ciagu dnia", x = "Dystrybutor", y = "Liczba nalan")+
+        scale_x_continuous( breaks = round(seq(min(final_df_summ$Dystrybutor),
+                                              max(final_df_summ$Dystrybutor), by = 1),1))+
+        geom_label(aes(label=Liczba_nalan), vjust=-0.5, color="#fca311", size=3.5)
+        
+
+```
+
+\pagebreak
+
+Liczba tankowań w ciągu jednego dnia dla poszczególnych dystryburorów, kolory określją jakie paliwo było tankowane na danym dystrybutorze, przez ile samochodów.
+
+
+```{r liczba_nalań_grupowanie_paliwem}
+final_df_summ_grup <- final_df %>% group_by(Dystrybutor, SYMBOL) %>%
+        summarise( Liczba_nalan = length(Dystrybutor), Litry =sum(Ilosc), 
+                   Przychod = round(sum(Wartość), 0)) 
+ggplot(final_df_summ_grup, aes(x=Dystrybutor, y=Liczba_nalan, fill = SYMBOL))+  
+        geom_bar(stat="identity") + 
+        theme(axis.text.x = element_text( color = "#000000", 
+        hjust = 1), axis.title.x = element_text(color = "#000000", face = "bold"),
+        axis.title.y = element_text( color = "#000000" ,face = "bold"), 
+        axis.text.y = element_text( color = "#000000", hjust = 1),
+        plot.title = element_text(hjust = 0.5, face = "bold" ))+
+        labs(title = "Liczba nalan w ciagu dnia", x = "Dystrybutor", y = "Liczba nalan", fill= "")+
+        scale_x_continuous( breaks = round(seq(min(final_df_summ_grup$Dystrybutor),
+                                              max(final_df_summ_grup$Dystrybutor), by = 1),1))+
+        scale_fill_manual(values = c("#c1292e", "#ffd400", "#14213d","#fca311","#437f97","#73ab84"))
+       
+```
+
+\pagebreak
+
+Liczba tankowań w ciągu jednego dnia dla poszczególnych dystryburorów, na wykresach pokazane są poszczególne plaiwa.
+
+```{r liczba tankowań grid }
+tankowania<- ggplot(final_df_summ_grup, aes(x=Dystrybutor, y=Liczba_nalan))+  
+        geom_bar(stat="identity", fill = "#14213d") + 
+        theme(axis.text.x = element_text( color = "#000000", size = 3.5), 
+              axis.title.x = element_text(color = "#000000", face ="bold"),
+        axis.title.y = element_text( color = "#000000" ,face = "bold"), 
+        axis.text.y = element_text( color = "#000000", hjust = 1))+
+        labs(title = "Liczba naln w ciągu dnia", x = "Dystrybutor", y = "Liczba nalań")+
+         scale_x_continuous(breaks = round(seq(min(final_df_summ_grup$Dystrybutor),
+                                              max(final_df_summ_grup$Dystrybutor), by = 1),1))+
+        facet_grid(~SYMBOL , margins = TRUE)
+tankowania+theme(plot.title = element_text(hjust = 0.5, face = "bold" ))+
+labs(title = "Pliwo zatankowa w danym dniu")
+```
+\pagebreak
+
+# Pobór paliwa z dystrybutorów.
+W tym paragrafie podzieliłem objętość zatankowanego paliwa na dystrybutory z których zostało zatankowne.
+Zwróć uwagę, że najwięcej paliwa było zatankowane na dystrybutorach 12 i 13 ale wcale nie oznacza to największwj liczby tankowań.  
+```{r zatankowane }
+ggplot(final_df_summ, aes(x=Dystrybutor, y=Litry))+  
+        geom_bar(stat="identity" , fill = "#fca311") + 
+        theme(axis.text.x = element_text( color = "#000000", 
+        hjust = 1), axis.title.x = element_text(color = "#000000", face = "bold"),
+        axis.title.y = element_text( color = "#000000" ,face = "bold"), 
+        axis.text.y = element_text( color = "#000000", hjust = 1), 
+        plot.title = element_text(hjust = 0.5, face = "bold" ))+
+        labs(title = "Paliwo zatankowane w danym dniu", y = "Paliwo (litry)")+ ylim(0,9000)+
+        scale_x_continuous(breaks = round(seq(min(final_df_summ$Dystrybutor),
+                                              max(final_df_summ$Dystrybutor), by = 1),1)) +
+        geom_label(aes(label=Litry), vjust=-0.5, color="#14213d", size=3.5) 
+```
+
+\pagebreak
+
+```{r zatankowane_grupowanie_paliwem }
+ggplot(final_df_summ_grup, aes(x=Dystrybutor, y=Litry, fill = SYMBOL))+  
+        geom_bar(stat="identity" ) + 
+        theme(axis.text.x = element_text( color = "#000000", 
+        hjust = 1), axis.title.x = element_text(color = "#000000", face = "bold"),
+        axis.title.y = element_text( color = "#000000" ,face = "bold"), 
+        axis.text.y = element_text( color = "#000000", hjust = 1), 
+        plot.title = element_text(hjust = 0.5, face = "bold" ))+
+        labs(title = "Paliwo zatankowane w danym dniu", y = "Paliwo (litry)", fill="")+ ylim(0,9000)+
+        scale_x_continuous(breaks = round(seq(min(final_df_summ_grup$Dystrybutor),
+                                              max(final_df_summ_grup$Dystrybutor), by = 1),1))+
+        scale_fill_manual(values = c("#c1292e", "#ffd400", "#14213d","#fca311","#437f97","#73ab84"))
+```
+
+\pagebreak
+
+```{r zatankowane_grid }
+ggplot(final_df_summ_grup, aes(x=Dystrybutor, y=Litry))+  
+        geom_bar(stat="identity", fill = "#fca311") + 
+        theme(axis.text.x = element_text( color = "#000000", size = 3.5), 
+              axis.title.x = element_text(color = "#000000", face ="bold"),
+        axis.title.y = element_text( color = "#000000" ,face = "bold"), 
+        axis.text.y = element_text( color = "#000000", hjust = 1), 
+        plot.title = element_text(hjust = 0.5, face = "bold" ))+
+        labs(title = "Paliwo zatankowane w danym dniu", x = "Dystrybutor", y = "Paliwo (litry)")+
+        scale_x_continuous(breaks = round(seq(min(final_df_summ_grup$Dystrybutor),
+                                              max(final_df_summ_grup$Dystrybutor), by = 1),1))+
+        facet_grid(~SYMBOL , margins = TRUE)
+```
+
+\pagebreak
+
+# Przychód z tankowań
+Gdybym znał marżę na poszczególnych paliwach, bez problemu mugłbym w podobny sposób przedstawić zyski.
+
+```{r przychod }
+ggplot(final_df_summ, aes(x=Dystrybutor, y=Przychod))+  
+        geom_bar(stat="identity" , fill = "#be451f") + 
+        theme(axis.text.x = element_text( color = "#000000", 
+        hjust = 1), axis.title.x = element_text(color = "#000000", face = "bold"),
+        axis.title.y = element_text( color = "#000000" ,face = "bold"), 
+        axis.text.y = element_text( color = "#000000", hjust = 1), 
+        plot.title = element_text(hjust = 0.5, face = "bold" ))+
+        labs(title = "Przychod z tankowan w danym dniu", y = "Przychod (PLN)")+ ylim(0,40000)+
+        scale_x_continuous(breaks = round(seq(min(final_df_summ$Dystrybutor),
+                                              max(final_df_summ$Dystrybutor), by = 1),1))+
+        geom_label(aes(label=Przychod), vjust=-0.5, color="#14213d", size=3.5) 
+```
+
+\pagebreak
+
+```{r przychod_grupowanie_paliwem }
+ggplot(final_df_summ_grup, aes(x=Dystrybutor, y=Przychod, fill = SYMBOL))+  
+        geom_bar(stat="identity") + 
+        theme(axis.text.x = element_text( color = "#000000", 
+        hjust = 1), axis.title.x = element_text(color = "#000000", face = "bold"),
+        axis.title.y = element_text( color = "#000000" ,face = "bold"), 
+        axis.text.y = element_text( color = "#000000", hjust = 1), 
+        plot.title = element_text(hjust = 0.5, face = "bold" ))+
+        labs(title = "Przychod z tankowan w danym dniu", y = "Przychod (PLN)", fill="")+ ylim(0,40000)+
+        scale_x_continuous(breaks = round(seq(min(final_df_summ_grup$Dystrybutor),
+                                              max(final_df_summ_grup$Dystrybutor), by = 1),1))+
+        scale_fill_manual(values = c("#c1292e", "#ffd400", "#14213d","#fca311","#437f97","#73ab84"))
+```
+\pagebreak
+
+```{r Przychod_grid }
+przychod<- ggplot(final_df_summ_grup, aes(x=Dystrybutor, y=Przychod))+  
+        geom_bar(stat="identity", fill="#be451f") + 
+        theme(axis.text.x = element_text( color = "#000000", size = 3.5), 
+              axis.title.x = element_text(color = "#000000", face ="bold"),
+        axis.title.y = element_text( color = "#000000" ,face = "bold"), 
+        axis.text.y = element_text( color = "#000000", hjust = 1))+
+        labs( x = "Dystrybutor", y = "Przychód (PLN)")+
+        scale_x_continuous(breaks = round(seq(min(final_df_summ_grup$Dystrybutor),
+                                              max(final_df_summ_grup$Dystrybutor), by = 1),1))+
+        facet_grid(~SYMBOL , margins = TRUE)
+przychod+theme(plot.title = element_text(hjust = 0.5, face = "bold" ))+
+labs(title = "Paliwo zatankowa w danym dniu")
+
+```
+
+\pagebreak
+# Zestawienie wszystkich parametrów na jednym zbiorczym wykresie.
+
+```{r zestawienie}
+dfm <- melt(final_df_summ_grup[,c('Dystrybutor','SYMBOL', 'Liczba_nalan', 'Litry', 'Przychod')],
+            id.vars = c('Dystrybutor', 'SYMBOL'))
+
+ggplot(dfm, aes(x=Dystrybutor, y = value, fill = variable)) + 
+geom_bar(stat="identity") + 
+facet_grid(variable ~SYMBOL, scales = "free_y", switch = "y")+
+scale_fill_manual(values = c("#be451f","#fca311", "#14213d"))+
+scale_x_continuous(breaks = round(seq(min(dfm$Dystrybutor), max(dfm$Dystrybutor), by = 1),1))+
+theme(axis.text.x = element_text( color = "#000000", size = 3.5), 
+      legend.position = "none", axis.title.x = element_text(color = "#000000", face ="bold"),
+      plot.title = element_text(hjust = 0.5, face = "bold"), 
+      strip.text = element_text(size=7,lineheight=5.0))+
+labs(title = "Zestawienie", y="", x="Dystrybutor")
+```
+\pagebreak
+
+# Dane
+
+W tabeli zebrałem wszystkei dane na podsyawie których wykoanałem wykresy.
+
+```{r}
+kable(final_df_summ_grup) 
+```
+
+
